@@ -116,6 +116,37 @@ def parse_args():
                       help='whether use tensorboard',
                       action='store_true')
 
+  ###############
+  # RESNET NASS #
+  ###############
+
+  parser.add_argument('--freezeout-t0', type=float, default=0.8,
+                      help=('How far into training to start freezing. Note that '
+                            'this if using cubic scaling then this is the uncubed'
+                            ' value.'))
+  parser.add_argument('--freezeout-mode', choices=('regular', 'layerReverse', 'shuffle'),
+                      default='regular',
+                      help=('`layer-reverse` freezes out later layers first'))
+  parser.add_argument('--stochastic-depth-mode', choices=(
+    'regular', 'layerReverse', 'constant'), default='regular',
+                      help='`layer-reverse` samples more heavily from later layers')
+  parser.add_argument('--stochastic-depth-k', type=int, default=6,
+                      help='Number of layers to train each run. NOTE this is '
+                           'ignored if the skd schedule is not constant.')
+  parser.add_argument('--stochastic-depth-k-schedule', default='constant',
+                      choices=('constant', 'increaseLinear', 'decreaseLinear',
+                               'increasePower', 'decreasePower'),
+                      help='allow k to decrease or increase throughout training, '
+                           'using a linear or power increasing or decreasing schedule.')
+  parser.add_argument('--stochastic-depth-power', type=float, default=1.0,
+                      help='Power to which skd schedule will be proportional to. '
+                           'Ignored if the skd schedule is not ...Power.')
+  parser.add_argument('--stochastic-depth-slope', type=float, default=-1.0,
+                      help='Slope to use for line representing layer sample '
+                           'probabilities. Negative values bias towards front of net.')
+  parser.add_argument('--stochastic-depth-start', type=int, default=1,
+                      help='K value to start at')
+
   args = parser.parse_args()
   return args
 
@@ -242,6 +273,8 @@ if __name__ == '__main__':
     fasterRCNN = resnet(imdb.classes, 50, pretrained=True, class_agnostic=args.class_agnostic)
   elif args.net == 'res152':
     fasterRCNN = resnet(imdb.classes, 152, pretrained=True, class_agnostic=args.class_agnostic)
+  elif args.net == 'res101skd':
+    fasterRCNN = resnet(imdb.classes, 101, pretrained=False, class_agnostic=args.class_agnostic, skd=True, args=args)
   else:
     print("network is not defined")
     pdb.set_trace()
@@ -306,7 +339,7 @@ if __name__ == '__main__':
         lr *= args.lr_decay_gamma
 
     data_iter = iter(dataloader)
-    for step in range(iters_per_epoch):
+    for batch_idx, step in enumerate(range(iters_per_epoch)):
       data = next(data_iter)
       im_data.data.resize_(data[0].size()).copy_(data[0])
       im_info.data.resize_(data[1].size()).copy_(data[1])
@@ -329,6 +362,8 @@ if __name__ == '__main__':
       if args.net == "vgg16":
           clip_gradient(fasterRCNN, 10.)
       optimizer.step()
+
+      module().hook_iterate(epoch, batch_idx, global_step, optimizer)
 
       if step % args.disp_interval == 0:
         end = time.time()
